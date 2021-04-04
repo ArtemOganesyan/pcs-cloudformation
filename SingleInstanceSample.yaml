@@ -1,0 +1,145 @@
+# Sample CloudFormation template
+# Author: Artem V. Oganesyan
+# 04-03-2021 v.1 - Initial version
+
+# Prerequisites: Check that you have created key pair for your instances and provide it for this template
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Sample CloudFormation template
+
+# Parameter definitions
+Parameters:
+    CIDR:
+        Description: CIDR block for VPC and Subnet
+        Type: String
+        Default: 10.0.0.0/24
+    KeyName:
+        Description: Name of your SSH key to use with resources
+        Type: String
+        Default: CFKey
+    OutputParameters:
+        Description: Variable for output results
+        Type: String
+        AllowedValues:
+          - none
+        Default: none
+        
+# Resource definitions
+Resources:
+
+    # Default VPC for the resources
+    PublicVPC:
+        Type: 'AWS::EC2::VPC'
+        Properties:
+            CidrBlock: !Ref CIDR
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+    
+    # Main subnet for resources
+    PublicSubnet:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            VpcId: !Ref PublicVPC
+            CidrBlock: !Ref CIDR
+        
+    # Internet Gateway
+    MainInternetGateway:
+        Type: 'AWS::EC2::InternetGateway'
+        
+    # Attaching InternetGateway to the VPC
+    AttachGateway:
+        Type: 'AWS::EC2::VPCGatewayAttachment'
+        Properties:
+            VpcId: !Ref PublicVPC
+            InternetGatewayId: !Ref MainInternetGateway
+            
+    # Default route table for VPC
+    DefaultRouteTable:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref PublicVPC
+            
+    # Routes definition for DefaultRouteTable
+    DefaultRoute:
+        Type: 'AWS::EC2::Route'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref MainInternetGateway
+            
+    # Association of RouteTable with the Subnet
+    SubnetRouteTableAssociation:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            SubnetId: !Ref PublicSubnet
+    
+    # SecurityGroup for web sever instances
+    WebServersSecurityGroup:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            GroupDescription: HTTP, SSH
+            VpcId: !Ref PublicVPC
+            SecurityGroupIngress:                           # Rules for incoming traffic
+            - IpProtocol: tcp
+              FromPort: 80                                  # Allow http traffic to port 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 22                                  # Allow ssh traffic to port 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+            SecurityGroupEgress:                            # Rules for outgoing traffic
+            - IpProtocol: tcp
+              FromPort: 80                                  # Allow http traffic from port 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 22                                  # Allow ssh traffic from port 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+              
+    # LaunchTemplate for EC2 instances
+    WebLaunchTemplate:
+        Type: 'AWS::EC2::LaunchTemplate'
+        Properties:
+            LaunchTemplateName: !Sub '${AWS::StackName}-template'
+            LaunchTemplateData:
+                NetworkInterfaces:
+                    - DeviceIndex: 0
+                      AssociatePublicIpAddress: true
+                      Groups:
+                        - !Ref WebServersSecurityGroup
+                      DeleteOnTermination: true
+                      SubnetId: !Ref PublicSubnet
+                Placement:
+                    Tenancy: default
+                ImageId: ami-0742b4e673072066f
+                InstanceType: t2.micro
+                KeyName: !Ref KeyName
+                UserData:                                   # User data script for instance bootstrapping
+                    Fn::Base64:
+                        !Sub |
+                            #!/bin/bash
+                            yum -y update
+                            yum -y install php
+                            yum -y install httpd
+                            echo "<html><h1>Server address: <?php echo \$_SERVER['SERVER_ADDR']; ?></h1></html>" > /var/www/html/index.php
+                            service httpd start
+                            chkconfig httpd on
+                            
+    # EC2 instance based on the template
+    TestInstance:
+        Type: AWS::EC2::Instance
+        Properties:
+            LaunchTemplate:
+                LaunchTemplateId: !Ref WebLaunchTemplate
+                Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
+                
+# Outputs section
+Outputs:
+    OutputParameters:
+        Description: Server Public IP
+        Value: !GetAtt TestInstance.PublicIp                # Get assigned public IP from the instance
+        Export:
+          Name: !Sub "${AWS::StackName}-PublicIp"
