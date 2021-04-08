@@ -1,0 +1,399 @@
+# Sample CloudFormation template
+# Author: Artem V. Oganesyan
+# 04-03-2021 v.1 - Initial version
+
+# Prerequisites: Check that you have created key pair for your instances and provide it for this template
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Sample CloudFormation template
+
+# Parameter definitions
+Parameters:
+    CIDR:
+        Description: CIDR block for VPC
+        Type: String
+        Default: 10.0.0.0/16
+    Subnet1Cidr:
+        Description: Subnet 1
+        Type: String
+        Default: 10.0.0.0/24
+    Subnet2Cidr:
+        Description: Subnet 2
+        Type: String
+        Default: 10.0.1.0/24
+    Subnet3Cidr:
+        Description: Subnet 3
+        Type: String
+        Default: 10.0.2.0/24
+    AZ1:
+        Description: Availability Zone 1
+        Type: String
+        Default: us-east-1a
+    AZ2:
+        Description: Availability Zone 2
+        Type: String
+        Default: us-east-1b
+    AZ3:
+        Description: Availability Zone 3
+        Type: String
+        Default: us-east-1c
+    KeyName:
+        Description: Name of your SSH key to use with resources
+        Type: String
+        Default: CFKey
+    OutputParameters:
+        Description: Variable for output results
+        Type: String
+        AllowedValues:
+          - none
+        Default: none
+        
+# Resource definitions
+Resources:
+
+    # Default VPC for the resources
+    MainVPC:
+        Type: 'AWS::EC2::VPC'
+        Properties:
+            CidrBlock: !Ref CIDR
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+    
+    # Subnet 1 for resources
+    Subnet1:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            VpcId: !Ref MainVPC
+            CidrBlock: !Ref Subnet1Cidr
+            AvailabilityZone: !Ref AZ1
+            MapPublicIpOnLaunch: true
+
+    # Subnet 2 for resources
+    Subnet2:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            VpcId: !Ref MainVPC
+            CidrBlock: !Ref Subnet2Cidr
+            AvailabilityZone: !Ref AZ2
+            MapPublicIpOnLaunch: true
+    
+    # Subnet 3 for resources
+    Subnet3:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            VpcId: !Ref MainVPC
+            CidrBlock: !Ref Subnet3Cidr
+            AvailabilityZone: !Ref AZ3
+            MapPublicIpOnLaunch: true
+        
+    # Internet Gateway
+    MainInternetGateway:
+        Type: 'AWS::EC2::InternetGateway'
+        
+    # Attaching InternetGateway to the VPC
+    AttachGateway:
+        Type: 'AWS::EC2::VPCGatewayAttachment'
+        Properties:
+            VpcId: !Ref MainVPC
+            InternetGatewayId: !Ref MainInternetGateway
+            
+    # Default route table for VPC
+    DefaultRouteTable:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref MainVPC
+            
+    # Routes definition for DefaultRouteTable
+    DefaultRoute:
+        Type: 'AWS::EC2::Route'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref MainInternetGateway
+            
+    # Referencing of RouteTable with the Subnets
+    Subnet1RouteTableAssociation:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            SubnetId: !Ref Subnet1
+
+    Subnet2RouteTableAssociation:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            SubnetId: !Ref Subnet2
+
+    Subnet3RouteTableAssociation:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref DefaultRouteTable
+            SubnetId: !Ref Subnet3
+    
+    # Security group for web sever instances
+    WebServersSecurityGroup:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            GroupDescription: HTTP, SSH
+            VpcId: !Ref MainVPC
+            SecurityGroupIngress:                           # Rules for incoming traffic
+            - IpProtocol: tcp
+              FromPort: 80                                  # Allow http traffic to port 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 22                                  # Allow ssh traffic to port 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+            SecurityGroupEgress:                            # Rules for outgoing traffic
+            - IpProtocol: tcp
+              FromPort: 0                                   # Allow all outgoing traffic
+              ToPort: 65535
+              CidrIp: 0.0.0.0/0
+
+    # Security group for the load balancer
+    LoadBalancerSecurityGroup:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            GroupDescription: HTTP
+            VpcId: !Ref MainVPC
+            SecurityGroupIngress:                           # Rules for incoming traffic
+            - IpProtocol: tcp
+              FromPort: 80                                  # Allow http traffic to port 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+              
+    # LaunchTemplate for EC2 instances
+    WebLaunchTemplate:
+        Type: 'AWS::EC2::LaunchTemplate'
+        Properties:
+            LaunchTemplateName: !Sub '${AWS::StackName}-template'
+            LaunchTemplateData:
+                NetworkInterfaces:
+                    - DeviceIndex: 0
+                      AssociatePublicIpAddress: true
+                      Groups:
+                        - !Ref WebServersSecurityGroup
+                      DeleteOnTermination: true
+                Placement:
+                    Tenancy: default
+                ImageId: ami-0742b4e673072066f
+                InstanceType: t2.micro
+                KeyName: !Ref KeyName
+                UserData:                                   # User data script for instance bootstrapping
+                    Fn::Base64:
+                        !Sub |
+                            #!/bin/bash
+                            yum -y update
+                            rpm -Uvh https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rpm
+                            yum -y install aspnetcore-runtime-5.0
+                            yum -y install dotnet-sdk-5.0
+                            yum -y install httpd
+                            yum -y install git
+                            echo "<VirtualHost *:80>
+                              ServerName www.DOMAIN.COM
+                              ProxyPreserveHost On
+                              ProxyPass / http://127.0.0.1:5000/
+                              ProxyPassReverse / http://127.0.0.1:5000/
+                              RewriteEngine on
+                              RewriteCond %{HTTP:UPGRADE} ^WebSocket$ [NC]
+                              RewriteCond %{HTTP:CONNECTION} Upgrade$ [NC]
+                              RewriteRule /(.*) ws://127.0.0.1:5000/$1 [P]
+                              ErrorLog /var/log/httpd/netcore-error.log
+                              CustomLog /var/log/httpd/netcore-access.log common
+                            </VirtualHost>" > /etc/httpd/conf.modules.d/20-netcore.conf
+                            service httpd start
+                            mkdir /var/netcore
+                            mkdir /var/netcore/source
+                            cd /var/netcore/source
+                            git clone https://github.com/ArtemOganesyan/pcs-webapp-main.git
+                            cd /var/netcore/source/pcs-webapp-main/MainWebApp
+                            mkdir /var/netcore/deployment
+                            sudo dotnet publish -c Release -o /var/netcore/deployment
+                            nohup /var/netcore/deployment/MainWebApp
+                            
+    # Autoscaling group for Main application
+    MainAutoscalingGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties: 
+            AutoScalingGroupName: MainASG
+            AvailabilityZones: 
+                - us-east-1a 
+                - us-east-1b 
+                - us-east-1c
+            DesiredCapacity: 2
+            LaunchTemplate: 
+                LaunchTemplateId: !Ref WebLaunchTemplate
+                Version: !GetAtt WebLaunchTemplate.LatestVersionNumber                                  
+            MaxSize: 3
+            MinSize: 1
+            TargetGroupARNs: 
+                - !Ref TargetGroupMain
+            VPCZoneIdentifier: 
+                - !Ref Subnet1                              
+                - !Ref Subnet2
+                - !Ref Subnet3
+
+    # Autoscaling group for Forum application
+    ForumAutoscalingGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties: 
+            AutoScalingGroupName: ForumASG                  # Name of autoscaling group
+            AvailabilityZones: 
+                - us-east-1a 
+                - us-east-1b 
+                - us-east-1c
+            DesiredCapacity: 2
+            LaunchTemplate: 
+                LaunchTemplateId: !Ref WebLaunchTemplate
+                Version: !GetAtt WebLaunchTemplate.LatestVersionNumber                                  
+            MaxSize: 3
+            MinSize: 1
+            TargetGroupARNs: 
+                - !Ref TargetGroupForum
+            VPCZoneIdentifier: 
+                - !Ref Subnet1                              
+                - !Ref Subnet2
+                - !Ref Subnet3
+
+    # Autoscaling group for Feedback application
+    FeedbackAutoscalingGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties: 
+            AutoScalingGroupName: FeedbackASG               # Name of autoscaling group
+            AvailabilityZones: 
+                - us-east-1a                                # List of availability zones for autoscaling group
+                - us-east-1b 
+                - us-east-1c
+            DesiredCapacity: 2                              # Desired number of instances. This number will be provisioned inirially.
+            LaunchTemplate: 
+                LaunchTemplateId: !Ref WebLaunchTemplate
+                Version: !GetAtt WebLaunchTemplate.LatestVersionNumber                                  
+            MaxSize: 3                                      # Maximum number of instances that can be provisioned for this group
+            MinSize: 1                                      # Minimum number of instances that can be provisioned for this group
+            TargetGroupARNs: 
+                - !Ref TargetGroupFeedback                  # Reference to target group
+            VPCZoneIdentifier: 
+                - !Ref Subnet1                              # List of subnets for autoscaling group                          
+                - !Ref Subnet2
+                - !Ref Subnet3
+    
+    # Application Load Balancer
+    LoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+            Name: ALB                                       # ELB name
+            IpAddressType: ipv4
+            Scheme: internet-facing                         # Internet-facing or internal ELB
+            SecurityGroups: 
+                - !GetAtt LoadBalancerSecurityGroup.GroupId # Security group reference for ELB
+            Subnets: 
+                - !Ref Subnet1                              # List of subnets where ELB will work
+                - !Ref Subnet2
+                - !Ref Subnet3
+            Type: application                               # Load balancer type
+
+    # Load balancer listener with default rule
+    HTTPlistener:
+        Type: "AWS::ElasticLoadBalancingV2::Listener"
+        Properties:
+            DefaultActions:
+            - Type: "forward"
+              TargetGroupArn: !Ref TargetGroupMain
+            LoadBalancerArn: !Ref LoadBalancer
+            Port: 80
+            Protocol: "HTTP"
+
+    # Load balancer listener rule for Forum application
+    ForumListenerRule:
+        Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+        Properties:
+            Actions:
+              - Type: forward
+                ForwardConfig:
+                  TargetGroups:
+                    - TargetGroupArn: !Ref TargetGroupForum
+            Conditions:
+              - Field: path-pattern
+                Values:
+                  - /Home/Forum
+            ListenerArn: !Ref HTTPlistener
+            Priority: 1
+
+    # Load balancer listener rule for Feedback application
+    FeedbackListenerRule:
+        Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+        Properties:
+            Actions:
+              - Type: forward
+                ForwardConfig:
+                  TargetGroups:
+                    - TargetGroupArn: !Ref TargetGroupFeedback
+            Conditions:
+              - Field: path-pattern
+                Values:
+                  - /Home/Feedback
+            ListenerArn: !Ref HTTPlistener
+            Priority: 2
+
+    # Target group for Main application
+    TargetGroupMain:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties: 
+            Name: Main-TG
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 10
+            HealthCheckPath: /                              # Checking that application at given path is working
+            HealthCheckPort: 80
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 5
+            HealthyThresholdCount: 2
+            UnhealthyThresholdCount: 2
+            Port: 80
+            Protocol: HTTP
+            TargetType: instance
+            VpcId: !Ref MainVPC                             # Attaching target group to the VPC
+
+    # Target group for Forum application
+    TargetGroupForum:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties: 
+            Name: Forum-TG
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 10
+            HealthCheckPath: /Home/Forum                    # Checking that application at given path is working
+            HealthCheckPort: 80
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 5
+            HealthyThresholdCount: 2
+            UnhealthyThresholdCount: 2
+            Port: 80
+            Protocol: HTTP
+            TargetType: instance
+            VpcId: !Ref MainVPC                             # Attaching target group to the VPC
+
+    # Target group for Feedback application
+    TargetGroupFeedback:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties: 
+            Name: Feedback-TG
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 10
+            HealthCheckPath: /Home/Feedback                 # Checking that application at given path is working
+            HealthCheckPort: 80
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 5
+            HealthyThresholdCount: 2
+            UnhealthyThresholdCount: 2
+            Port: 80
+            Protocol: HTTP
+            TargetType: instance
+            VpcId: !Ref MainVPC                             # Attaching target group to the VPC
+                
+# Outputs section
+Outputs:
+    OutputParameters:
+        Description: Load balancer DNS name
+        Value: !GetAtt LoadBalancer.DNSName                 # Get DNS name of load balancer
+        Export:
+          Name: !Sub "${AWS::StackName}-LoadBalancerDNS"
