@@ -131,6 +131,14 @@ Resources:
             LaunchTemplate:
                 LaunchTemplateId: !Ref WebLaunchTemplate
                 Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
+
+    # EC2 instance based on the template
+    TestInstance1:
+        Type: AWS::EC2::Instance
+        Properties:
+            LaunchTemplate:
+                LaunchTemplateId: !Ref WebLaunchTemplate
+                Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
                 
 # Outputs section
 Outputs:

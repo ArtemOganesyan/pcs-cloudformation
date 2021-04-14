@@ -41,6 +41,10 @@ Parameters:
         Description: Name of your SSH key to use with resources
         Type: String
         Default: CFKey
+    ImageId:
+        Description: AMI image ID for the instances
+        Type: String
+        Default: ami-0742b4e673072066f
     OutputParameters:
         Description: Variable for output results
         Type: String
@@ -177,7 +181,7 @@ Resources:
                       DeleteOnTermination: true
                 Placement:
                     Tenancy: default
-                ImageId: ami-0742b4e673072066f
+                ImageId: !Ref ImageId
                 InstanceType: t2.micro
                 KeyName: !Ref KeyName
                 UserData:                                   # User data script for instance bootstrapping
@@ -218,9 +222,9 @@ Resources:
         Properties: 
             AutoScalingGroupName: MainASG
             AvailabilityZones: 
-                - us-east-1a 
-                - us-east-1b 
-                - us-east-1c
+                - !Ref AZ1 
+                - !Ref AZ2 
+                - !Ref AZ3
             DesiredCapacity: 2
             LaunchTemplate: 
                 LaunchTemplateId: !Ref WebLaunchTemplate
@@ -240,9 +244,9 @@ Resources:
         Properties: 
             AutoScalingGroupName: ForumASG                  # Name of autoscaling group
             AvailabilityZones: 
-                - us-east-1a 
-                - us-east-1b 
-                - us-east-1c
+                - !Ref AZ1 
+                - !Ref AZ2 
+                - !Ref AZ3
             DesiredCapacity: 2
             LaunchTemplate: 
                 LaunchTemplateId: !Ref WebLaunchTemplate
@@ -262,9 +266,9 @@ Resources:
         Properties: 
             AutoScalingGroupName: FeedbackASG               # Name of autoscaling group
             AvailabilityZones: 
-                - us-east-1a                                # List of availability zones for autoscaling group
-                - us-east-1b 
-                - us-east-1c
+                - !Ref AZ1 
+                - !Ref AZ2 
+                - !Ref AZ3
             DesiredCapacity: 2                              # Desired number of instances. This number will be provisioned inirially.
             LaunchTemplate: 
                 LaunchTemplateId: !Ref WebLaunchTemplate
